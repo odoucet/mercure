@@ -254,6 +254,7 @@ func (t *RedisTransport) Close() (err error) {
 
 // dispatchHistory retrieves and dispatches historical events to a subscriber.
 // Events are fetched from Redis based on the subscriber's RequestLastEventID.
+//
 //nolint:gocognit
 func (t *RedisTransport) dispatchHistory(s *LocalSubscriber, toSeq uint64) error {
 	// Get all update keys from Redis sorted by sequence number

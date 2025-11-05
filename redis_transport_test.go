@@ -59,10 +59,10 @@ func createRedisTransport(t *testing.T, size uint64, cleanupFrequency float64) *
 	// Clean up any existing test data
 	opts, err := redis.ParseURL(redisURL)
 	require.NoError(t, err)
-	
+
 	client := redis.NewClient(opts)
 	ctx := context.Background()
-	
+
 	// Flush the test database to ensure clean state
 	require.NoError(t, client.FlushDB(ctx).Err())
 	client.Close()
@@ -263,7 +263,7 @@ func TestRedisTransportPurgeHistory(t *testing.T) {
 	// Count the number of keys in Redis
 	keys, err := transport.client.Keys(transport.ctx, redisUpdatePrefix+"*").Result()
 	require.NoError(t, err)
-	
+
 	// Should have approximately 5 events (may be slightly more due to async cleanup)
 	assert.LessOrEqual(t, len(keys), 7, "Too many events retained after cleanup")
 	assert.GreaterOrEqual(t, len(keys), 5, "Too few events retained after cleanup")
@@ -337,7 +337,7 @@ func TestRedisTransportClosed(t *testing.T) {
 
 	// Close the transport
 	require.NoError(t, transport.Close())
-	
+
 	// Operations should fail after close
 	require.Error(t, transport.AddSubscriber(s))
 
@@ -419,7 +419,7 @@ func TestRedisTransportInvalidURL(t *testing.T) {
 	// Try to create a transport with an invalid URL
 	_, err := NewRedisTransport(NewSubscriberList(0), zap.NewNop(), "invalid://url", 0, 0)
 	require.Error(t, err)
-	
+
 	// Verify it returns a TransportError
 	var transportErr *TransportError
 	assert.ErrorAs(t, err, &transportErr)
@@ -431,7 +431,7 @@ func TestRedisTransportConnectionFailure(t *testing.T) {
 	// Try to connect to a non-existent Redis server
 	_, err := NewRedisTransport(NewSubscriberList(0), zap.NewNop(), "redis://localhost:1/0", 0, 0)
 	require.Error(t, err)
-	
+
 	// Verify it returns a TransportError
 	var transportErr *TransportError
 	assert.ErrorAs(t, err, &transportErr)
