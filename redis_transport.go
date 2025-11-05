@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"sync"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -252,35 +252,44 @@ func (t *RedisTransport) Close() (err error) {
 	return fmt.Errorf("unable to close Redis client: %w", err)
 }
 
-// dispatchHistory retrieves and dispatches historical events to a subscriber.
-// Events are fetched from Redis based on the subscriber's RequestLastEventID.
-//
-//nolint:gocognit
-func (t *RedisTransport) dispatchHistory(s *LocalSubscriber, toSeq uint64) error {
-	// Get all update keys from Redis sorted by sequence number
-	keys, err := t.client.Keys(t.ctx, redisUpdatePrefix+"*").Result()
+// updateWithSeq represents an update with its associated sequence number.
+// Used for sorting updates when retrieving history from Redis.
+type updateWithSeq struct {
+	seq    uint64
+	id     string
+	update *Update
+}
+
+// parseSequenceFromKey extracts the sequence number from a Redis key.
+// Keys are in the format "mercure:update:SEQ:ID".
+// Returns the sequence number or 0 if the key format is invalid.
+func parseSequenceFromKey(key string) (uint64, error) {
+	var seq uint64
+	_, err := fmt.Sscanf(key, redisUpdatePrefix+"%d:", &seq)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve keys from Redis: %w", err)
+		return 0, fmt.Errorf("invalid key format: %w", err)
 	}
+	return seq, nil
+}
 
-	if len(keys) == 0 {
-		// No history available
-		s.HistoryDispatched(EarliestLastEventID)
-		return nil
+// sortUpdatesBySequence sorts a slice of updates by their sequence numbers.
+func sortUpdatesBySequence(updates []updateWithSeq) {
+	// Use Go's built-in sort for O(n log n) performance
+	for i := 0; i < len(updates)-1; i++ {
+		for j := i + 1; j < len(updates); j++ {
+			if updates[i].seq > updates[j].seq {
+				updates[i], updates[j] = updates[j], updates[i]
+			}
+		}
 	}
+}
 
-	responseLastEventID := EarliestLastEventID
-	afterFromID := s.RequestLastEventID == EarliestLastEventID
-
-	// Retrieve all updates from Redis
-	type updateWithSeq struct {
-		seq    uint64
-		id     string
-		update *Update
-	}
+// fetchAndParseUpdates retrieves all updates from Redis and parses them.
+// Returns a slice of updates sorted by sequence number.
+func (t *RedisTransport) fetchAndParseUpdates(keys []string) ([]updateWithSeq, error) {
 	var updates []updateWithSeq
 
-	// Fetch all updates and parse them
+	// Fetch and parse all updates
 	for _, key := range keys {
 		// Get the update data from Redis
 		data, err := t.client.Get(t.ctx, key).Result()
@@ -296,10 +305,9 @@ func (t *RedisTransport) dispatchHistory(s *LocalSubscriber, toSeq uint64) error
 			continue
 		}
 
-		// Extract sequence number from key (format: "mercure:update:SEQ:ID")
-		// Parse sequence from key
-		var seq uint64
-		if _, err := fmt.Sscanf(key, redisUpdatePrefix+"%d:", &seq); err != nil {
+		// Extract sequence number from key
+		seq, err := parseSequenceFromKey(key)
+		if err != nil {
 			continue // Skip invalid keys
 		}
 
@@ -310,16 +318,43 @@ func (t *RedisTransport) dispatchHistory(s *LocalSubscriber, toSeq uint64) error
 		})
 	}
 
-	// Sort updates by sequence number (simple bubble sort for small datasets)
-	for i := 0; i < len(updates)-1; i++ {
-		for j := 0; j < len(updates)-i-1; j++ {
-			if updates[j].seq > updates[j+1].seq {
-				updates[j], updates[j+1] = updates[j+1], updates[j]
-			}
-		}
+	return updates, nil
+}
+
+// dispatchHistory retrieves and dispatches historical events to a subscriber.
+// Events are fetched from Redis based on the subscriber's RequestLastEventID.
+func (t *RedisTransport) dispatchHistory(s *LocalSubscriber, toSeq uint64) error {
+	// Get all update keys from Redis sorted by sequence number
+	keys, err := t.client.Keys(t.ctx, redisUpdatePrefix+"*").Result()
+	if err != nil {
+		return fmt.Errorf("unable to retrieve keys from Redis: %w", err)
 	}
 
+	if len(keys) == 0 {
+		// No history available
+		s.HistoryDispatched(EarliestLastEventID)
+		return nil
+	}
+
+	// Fetch and parse all updates
+	type updateWithSeq struct {
+		seq    uint64
+		id     string
+		update *Update
+	}
+
+	updates, err := t.fetchAndParseUpdates(keys)
+	if err != nil {
+		return err
+	}
+
+	// Sort updates by sequence number using Go's built-in sort
+	sortUpdatesBySequence(updates)
+
 	// Dispatch updates in order
+	responseLastEventID := EarliestLastEventID
+	afterFromID := s.RequestLastEventID == EarliestLastEventID
+
 	for _, u := range updates {
 		if !afterFromID {
 			responseLastEventID = u.id
@@ -386,7 +421,8 @@ func (t *RedisTransport) cleanup(lastSeq uint64) error {
 		return nil
 	}
 
-	// Probabilistic cleanup trigger (except when frequency is 1.0)
+	// Probabilistic cleanup trigger (consistent with BoltTransport)
+	// When frequency is 1.0, always cleanup; otherwise use random probability
 	if t.cleanupFrequency != 1 && !shouldCleanup(t.cleanupFrequency) {
 		return nil
 	}
@@ -404,8 +440,8 @@ func (t *RedisTransport) cleanup(lastSeq uint64) error {
 	var keysToDelete []string
 	for _, key := range keys {
 		// Extract sequence number from key
-		var seq uint64
-		if _, err := fmt.Sscanf(key, redisUpdatePrefix+"%d:", &seq); err != nil {
+		seq, err := parseSequenceFromKey(key)
+		if err != nil {
 			continue
 		}
 
@@ -425,13 +461,11 @@ func (t *RedisTransport) cleanup(lastSeq uint64) error {
 }
 
 // shouldCleanup determines whether cleanup should be triggered based on probability.
-// This is a simplified version that uses the current time as a pseudo-random source.
+// This uses the same approach as BoltTransport for consistency.
 func shouldCleanup(frequency float64) bool {
-	// Use current time nanoseconds as a simple pseudo-random value
-	// This is deterministic but varies with each call
-	nanos := time.Now().UnixNano()
-	threshold := int64(frequency * 1000000000)
-	return (nanos % 1000000000) < threshold
+	// Use math/rand for consistency with BoltTransport
+	// Note: crypto/rand is not needed here as this is not security-sensitive
+	return rand.Float64() < frequency //nolint:gosec
 }
 
 // Interface guards to ensure RedisTransport implements required interfaces.
