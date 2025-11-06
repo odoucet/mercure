@@ -25,6 +25,19 @@ It's free software (AGPL) written in Go. It is provided along with a library tha
 
 In addition, a managed and high-scalability version of the Mercure.rocks hub is [available on Mercure.rocks](https://mercure.rocks/pricing).
 
+## Development Quick Start
+
+```bash
+# Compile the binary
+go build -o mercure .
+
+# Run tests
+go test -v ./...
+
+# Build Docker image (requires compiled binary)
+docker build -t odoucet/mercure-ha .
+```
+
 ## Why this fork?
 
 The original Mercure project does not include native High Availability support. This feature is only available through the [official SaaS offering](https://mercure.rocks/pricing) or via a [dedicated on-premise HA license](https://mercure.rocks/docs/hub/cluster#high-availability-on-premise-version), which costs several thousand dollars per year — but includes professional support.
