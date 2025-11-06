@@ -8,7 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -20,7 +20,7 @@ func getTestRedisURL() string {
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		return url
 	}
-	return "redis://localhost:6379/15" // Use DB 15 for testing to avoid conflicts
+	return "redis://127.0.0.1:6379/15" // Use DB 15 for testing to avoid conflicts
 }
 
 // isRedisAvailable checks if Redis is available for testing.

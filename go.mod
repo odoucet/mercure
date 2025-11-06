@@ -10,6 +10,7 @@ retract (
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dunglas/skipfilter v1.0.0
+	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gorilla/handlers v1.5.2
@@ -17,7 +18,6 @@ require (
 	github.com/maypok86/otter/v2 v2.2.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/redis/go-redis/v9 v9.16.0
 	github.com/rs/cors v1.11.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
